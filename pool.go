@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-type Item struct {
+type Task struct {
 	mu sync.Mutex
 
 	function      func() bool
@@ -20,16 +20,16 @@ type Pool struct {
 	mu sync.Mutex
 	wg sync.WaitGroup
 
-	list               map[string]*Item
-	processQueue       []string //list of ID first in first out with requeue
+	taskList           map[string]*Task
+	taskQueue          []string //taskList of ID first in first out with requeue
 	RemainingProcesses int
 	MaxWorkers         int
 	MaxRetries         int
 	cl                 bool
 }
 
-func NewItem(function func() bool) *Item {
-	return &Item{
+func NewTask(function func() bool) *Task {
+	return &Task{
 		mu:         sync.Mutex{},
 		function:   function,
 		processing: false,
@@ -37,74 +37,74 @@ func NewItem(function func() bool) *Item {
 	}
 }
 
-func (i *Item) Processing() {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	i.processing = true
+func (t *Task) Processing() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.processing = true
 }
 
-func (i *Item) IsProcessing() bool {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	return i.processing
+func (t *Task) IsProcessing() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.processing
 }
 
-func (i *Item) PendingCancel() {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	i.pendingCancel = true
+func (t *Task) PendingCancel() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.pendingCancel = true
 }
 
 func NewQueue(maxWorkers, maxRetries int) *Pool {
 	return &Pool{
-		wg:           sync.WaitGroup{},
-		mu:           sync.Mutex{},
-		list:         make(map[string]*Item),
-		processQueue: make([]string, 0),
-		cl:           false,
-		MaxWorkers:   maxWorkers,
-		MaxRetries:   maxRetries,
+		wg:         sync.WaitGroup{},
+		mu:         sync.Mutex{},
+		taskList:   make(map[string]*Task),
+		taskQueue:  make([]string, 0),
+		cl:         false,
+		MaxWorkers: maxWorkers,
+		MaxRetries: maxRetries,
 	}
 }
 
-func (p *Pool) NewItem(function func() bool) string {
+func (p *Pool) NewTask(function func() bool) string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	p.RemainingProcesses++
 
-	item := NewItem(function)
+	item := NewTask(function)
 
-	p.list[item.id] = item
-	p.processQueue = append(p.processQueue, item.id)
+	p.taskList[item.id] = item
+	p.taskQueue = append(p.taskQueue, item.id)
 
 	return item.id
 }
 
-func (p *Pool) Processing(item *Item) {
+func (p *Pool) Processing(item *Task) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	item.Processing()
-	p.list[item.id] = item
+	p.taskList[item.id] = item
 }
 
 func (p *Pool) IsProcessing(id string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	return p.list[id].IsProcessing()
+	return p.taskList[id].IsProcessing()
 }
 
-func (p *Pool) Next() (*Item, error) {
+func (p *Pool) Next() (*Task, error) {
 	//p.mu.Lock()
 	//defer p.mu.Unlock()
 
-	//if len(p.processQueue) == 0 {
-	//    return &Item{}, errors.New("no items in queue")
+	//if len(p.taskQueue) == 0 {
+	//    return &Task{}, errors.New("no items in queue")
 	//}
 	item, err := p.dequeue()
 	if err != nil {
-		return &Item{}, err
+		return &Task{}, err
 	}
 	return item, nil
 }
@@ -112,22 +112,22 @@ func (p *Pool) Next() (*Item, error) {
 func (p *Pool) Size() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return len(p.list)
+	return len(p.taskList)
 }
 
-func (p *Pool) remove(item *Item) {
+func (p *Pool) remove(item *Task) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	p.RemainingProcesses--
 
-	delete(p.list, item.id)
+	delete(p.taskList, item.id)
 }
 
-func (p *Pool) Find(id string) (*Item, bool) {
+func (p *Pool) Find(id string) (*Task, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	item, found := p.list[id]
+	item, found := p.taskList[id]
 	return item, found
 }
 
@@ -141,7 +141,7 @@ func (p *Pool) Cancel(id string) error {
 	} else {
 		if item.IsProcessing() {
 			item.PendingCancel()
-			p.list[item.id] = item
+			p.taskList[item.id] = item
 			return errors.New("item processing")
 		}
 		p.remove(item)
@@ -150,23 +150,23 @@ func (p *Pool) Cancel(id string) error {
 	return nil
 }
 
-func (p *Pool) requeue(item *Item) {
+func (p *Pool) requeue(item *Task) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.processQueue = append(p.processQueue, item.id)
+	p.taskQueue = append(p.taskQueue, item.id)
 }
 
-func (p *Pool) dequeue() (*Item, error) {
+func (p *Pool) dequeue() (*Task, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.processQueue) == 0 {
-		return &Item{}, errors.New("no items in queue")
+	if len(p.taskQueue) == 0 {
+		return &Task{}, errors.New("no items in queue")
 	}
-	id := p.processQueue[0]
-	p.processQueue = p.processQueue[1:]
-	item, found := p.list[id]
+	id := p.taskQueue[0]
+	p.taskQueue = p.taskQueue[1:]
+	item, found := p.taskList[id]
 	if !found {
-		return &Item{}, errors.New("item not found")
+		return &Task{}, errors.New("item not found")
 	}
 	return item, nil
 }
@@ -174,9 +174,9 @@ func (p *Pool) dequeue() (*Item, error) {
 func (p *Pool) removeFromQueue(id string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for i, v := range p.processQueue {
+	for i, v := range p.taskQueue {
 		if v == id {
-			p.processQueue = append(p.processQueue[:i], p.processQueue[i+1:]...)
+			p.taskQueue = append(p.taskQueue[:i], p.taskQueue[i+1:]...)
 		}
 	}
 }
@@ -184,7 +184,7 @@ func (p *Pool) removeFromQueue(id string) {
 func (p *Pool) Len() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return len(p.processQueue)
+	return len(p.taskQueue)
 }
 
 func (p *Pool) Done() {
@@ -199,7 +199,7 @@ func (p *Pool) AddWait() {
 	p.wg.Add(1)
 }
 
-func (p *Pool) Process(item *Item) bool {
+func (p *Pool) Process(item *Task) bool {
 	p.Processing(item)
 	return item.function()
 }
