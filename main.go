@@ -1,40 +1,53 @@
 package main
 
 import (
-    "awesomeProject1/workers"
-    "fmt"
-    "math/rand"
-    "strconv"
-    "time"
+	"fmt"
+	"math/rand"
+	"strconv"
+	"time"
+	"workerPools/workers"
 )
 
-var MyWorkers = workers.NewQueue()
+var MaxWorkers = 10
+var MaxRetries = 3
+var MyWorkers = workers.NewQueue(MaxWorkers, MaxRetries)
+var totalSequentialDuration time.Duration
 
 func processX(x int) {
-    r := rand.Intn(500)
-    time.Sleep(time.Duration(r) * time.Millisecond)
-    fmt.Println("Process", strconv.Itoa(x))
+	r := rand.Intn(2000)
+	dur := time.Duration(r) * time.Millisecond
+	time.Sleep(dur)
+	fmt.Printf("Process %s: processing time: %v\n", strconv.Itoa(x), dur)
+	totalSequentialDuration = totalSequentialDuration + dur
 }
 
 func main() {
-    go MyWorkers.RunWorkers()
+	go MyWorkers.RunWorkers()
 
-    for i := 0; i < 100; i++ {
-        r := rand.Intn(100)
-        time.Sleep(time.Duration(r) * time.Millisecond)
-        MyWorkers.Push(workers.Item{Name: "process " + strconv.Itoa(i+1), Function: func() { processX(i + 1) }})
-    }
+	startTime := time.Now()
 
-    l := MyWorkers.Len()
+	for i := 0; i < 100; i++ {
+		//r := rand.Intn(100)
+		//time.Sleep(time.Duration(r) * time.Millisecond)
+		MyWorkers.NewItem(func() bool {
+			processX(i + 1)
+			return true
+		})
+	}
 
-    fmt.Println("Pool Size:", l)
+	l := MyWorkers.Len()
+	rp := MyWorkers.RemainingProcesses
 
-    //Wait for the pool to be clear
-    for l > 0 {
-        time.Sleep(100 * time.Millisecond)
-        l = MyWorkers.Len()
-    }
-    time.Sleep(500 * time.Millisecond)
+	fmt.Println("Pool Size:", l)
 
-    fmt.Println("Done Pool Size:", MyWorkers.Len())
+	//Wait for the pool to be clear
+	for rp > 0 {
+		rp = MyWorkers.RemainingProcesses
+	}
+
+	fmt.Println("Done Pool Size:", MyWorkers.Len())
+	fmt.Println("Total Sequential Duration:", totalSequentialDuration)
+	parDur := time.Since(startTime)
+	fmt.Println("Total Parallel Duration:", parDur)
+	fmt.Println("Total Time Saved:", totalSequentialDuration-parDur)
 }
