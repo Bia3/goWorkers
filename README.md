@@ -17,8 +17,8 @@ import (
     "time"
 )
 
-var MaxWorkers = 10
-var MaxRetries = 3
+var MaxWorkers = 20
+var MaxRetries = 0
 var MyWorkers = goWorkers.NewQueue(MaxWorkers, MaxRetries)
 var totalSequentialDuration time.Duration
 
@@ -44,7 +44,7 @@ func main() {
         })
     }
 
-    l := MyWorkers.Len()
+    l := MyWorkers.Size()
     rp := MyWorkers.RemainingProcesses
 
     fmt.Println("Pool Size:", l)
@@ -52,12 +52,17 @@ func main() {
     //Wait for the pool to be clear
     for rp > 0 {
         rp = MyWorkers.RemainingProcesses
+        if int(time.Since(startTime).Milliseconds())%2000 == 0 {
+            fmt.Printf("Processs remaining: %d\n  Current queue length: %d\n  Currently processing: %d\n", rp, MyWorkers.Len(), rp-MyWorkers.Len())
+            time.Sleep(20 * time.Millisecond)
+        }
     }
 
-    fmt.Println("Done Pool Size:", MyWorkers.Len())
+    fmt.Println("Pool Size at Completion:", MyWorkers.Size())
     fmt.Println("Total Sequential Duration:", totalSequentialDuration)
     parDur := time.Since(startTime)
     fmt.Println("Total Parallel Duration:", parDur)
+    fmt.Printf("Parallel Speedup: %.2f%%\n", (1-float64(parDur)/float64(totalSequentialDuration))*100)
     fmt.Println("Total Time Saved:", totalSequentialDuration-parDur)
 }
 ```

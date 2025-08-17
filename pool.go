@@ -109,6 +109,12 @@ func (p *Pool) Next() (*Item, error) {
 	return item, nil
 }
 
+func (p *Pool) Size() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.list)
+}
+
 func (p *Pool) remove(item *Item) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
