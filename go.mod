@@ -1,4 +1,4 @@
-module goWorkers
+module github.com/Bia3/goWorkers
 
 go 1.24
 
