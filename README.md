@@ -1,3 +1,11 @@
+# goWorkers
+
+Is a Library for managing a background pool of workers that can be configured to match the number of CPUs availible on the system and can set a maximum number of retires.
+
+Currently, this is a work in progress and is my first library. Any help or comments are welcome.
+
+## Usage Example
+```go
 package main
 
 import (
@@ -5,7 +13,7 @@ import (
 	"math/rand"
 	"strconv"
 	"time"
-	"workerPools/workers"
+	"github.com/Bia3/goWorkers"
 )
 
 var MaxWorkers = 10
@@ -51,3 +59,4 @@ func main() {
 	fmt.Println("Total Parallel Duration:", parDur)
 	fmt.Println("Total Time Saved:", totalSequentialDuration-parDur)
 }
+```

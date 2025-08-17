@@ -1,4 +1,4 @@
-module workerPools
+module goWorkers
 
 go 1.24
 
