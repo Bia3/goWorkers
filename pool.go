@@ -78,6 +78,13 @@ func (t *Task) Processing() {
 	t.processing = true
 }
 
+// ResetProcessing resets the processing state of the task.
+func (t *Task) ResetProcessing() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.processing = false
+}
+
 // IsProcessing returns whether the task is currently being processed.
 func (t *Task) IsProcessing() bool {
 	t.mu.Lock()
@@ -388,6 +395,7 @@ func (p *Pool) processNext() error {
 		// Retry the task if retries are available
 		if item.retryCount < p.MaxRetries-1 {
 			item.retryCount++
+			item.ResetProcessing()
 			p.requeue(item)
 			return nil
 		}
