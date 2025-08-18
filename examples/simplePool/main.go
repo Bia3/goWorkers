@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/Bia3/goWorkers"
 	"math/rand"
@@ -27,20 +28,20 @@ func main() {
 	startTime := time.Now()
 
 	for i := 0; i < 100; i++ {
-		MyWorkers.NewTask(func() bool {
+		MyWorkers.NewTask(context.Background(), func() bool {
 			processX(i + 1)
 			return true
 		})
 	}
 
 	l := MyWorkers.Size()
-	rp := MyWorkers.RemainingProcesses
+	rp := MyWorkers.RemainingTasks()
 
 	fmt.Println("Pool Size:", l)
 
 	//Wait for the pool to be clear
 	for rp > 0 {
-		rp = MyWorkers.RemainingProcesses
+		rp = MyWorkers.RemainingTasks()
 		if int(time.Since(startTime).Milliseconds())%2000 == 0 {
 			fmt.Printf("Processs remaining: %d\n  Current queue length: %d\n  Currently processing: %d\n", rp, MyWorkers.Len(), rp-MyWorkers.Len())
 			time.Sleep(20 * time.Millisecond)
