@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	"sync"
+	"time"
 )
 
 // ErrNoTasksInQueue is returned when trying to dequeue from an empty queue
@@ -15,6 +16,9 @@ var ErrTaskNotFound = errors.New("task not found")
 
 // ErrTaskProcessing is returned when trying to cancel a task that is currently processing
 var ErrTaskProcessing = errors.New("task is processing, cancellation signal sent")
+
+// ErrPoolClosed is returned when trying to add a task to a closed pool
+var ErrPoolClosed = errors.New("worker pool is closed, not accepting new tasks")
 
 // Task represents a unit of work to be processed by the worker pool.
 type Task struct {
@@ -40,6 +44,7 @@ type Pool struct {
 	MaxWorkers         int              // Maximum number of concurrent workers
 	MaxRetries         int              // Maximum number of retries for failed tasks
 	closed             bool             // Whether the pool is closed
+	shutdownCh         chan struct{}    // Channel to signal shutdown
 }
 
 // RemainingTasks returns the number of tasks that still need to be processed.
@@ -116,6 +121,7 @@ func NewPool(maxWorkers, maxRetries int) *Pool {
 		closed:     false,
 		MaxWorkers: maxWorkers,
 		MaxRetries: maxRetries,
+		shutdownCh: make(chan struct{}),
 	}
 }
 
@@ -126,10 +132,14 @@ func NewQueue(maxWorkers, maxRetries int) *Pool {
 }
 
 // NewTask adds a new task to the pool with the given context and function.
-// It returns the ID of the created task.
-func (p *Pool) NewTask(ctx context.Context, function func() bool) string {
+// It returns the ID of the created task and an error if the pool is closed.
+func (p *Pool) NewTask(ctx context.Context, function func() bool) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	if p.closed {
+		return "", ErrPoolClosed
+	}
 
 	p.RemainingProcesses++
 
@@ -138,7 +148,7 @@ func (p *Pool) NewTask(ctx context.Context, function func() bool) string {
 	p.taskList[item.id] = item
 	p.taskQueue = append(p.taskQueue, item.id)
 
-	return item.id
+	return item.id, nil
 }
 
 // processing marks a task as being processed.
@@ -276,6 +286,44 @@ func (p *Pool) Wait() {
 	p.wg.Wait()
 }
 
+// Shutdown gracefully shuts down the worker pool.
+// It stops accepting new tasks and waits for all currently running tasks to complete.
+// If timeout is greater than 0, it will wait for at most the specified duration for tasks to complete.
+// If timeout is 0 or negative, it will wait indefinitely.
+// Returns true if all tasks completed successfully, false if the timeout was reached.
+func (p *Pool) Shutdown(timeout time.Duration) bool {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return true
+	}
+	p.closed = true
+	p.mu.Unlock()
+
+	// Signal the RunWorkers method to stop
+	close(p.shutdownCh)
+
+	// If timeout is 0 or negative, wait indefinitely
+	if timeout <= 0 {
+		p.Wait()
+		return true
+	}
+
+	// Wait with timeout
+	done := make(chan struct{})
+	go func() {
+		p.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
 // AddWait increments the wait group counter.
 func (p *Pool) AddWait() {
 	p.wg.Add(1)
@@ -365,24 +413,46 @@ func (p *Pool) processAll() {
 }
 
 // RunWorkers starts the worker pool and processes tasks as they are added.
+// It will continue running until Shutdown is called.
 func (p *Pool) RunWorkers() {
-	for !p.closed {
-		l := p.Len()
-		if l > 0 {
-			if l > p.MaxWorkers {
-				for i := 0; i < p.MaxWorkers; i++ {
-					p.AddWait()
-					go func() {
-						err := p.processNext()
-						if err != nil {
-							return
-						}
-					}()
+	for {
+		select {
+		case <-p.shutdownCh:
+			// Pool is shutting down, process remaining tasks but don't accept new ones
+			p.processRemainingTasks()
+			return
+		default:
+			// Continue normal operation
+			l := p.Len()
+			if l > 0 {
+				if l > p.MaxWorkers {
+					for i := 0; i < p.MaxWorkers; i++ {
+						p.AddWait()
+						go func() {
+							err := p.processNext()
+							if err != nil {
+								return
+							}
+						}()
+					}
+				} else {
+					p.processAll()
 				}
+				p.Wait()
 			} else {
-				p.processAll()
+				// No tasks to process, sleep briefly to avoid CPU spinning
+				time.Sleep(10 * time.Millisecond)
 			}
-			p.Wait()
 		}
+	}
+}
+
+// processRemainingTasks processes all remaining tasks in the queue.
+// This is used during shutdown to ensure all tasks are completed.
+func (p *Pool) processRemainingTasks() {
+	// Process all remaining tasks
+	for p.Len() > 0 {
+		p.processAll()
+		p.Wait()
 	}
 }

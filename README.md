@@ -1,64 +1,69 @@
 # goWorkers
 
-Is a Library for managing a background pool of workers that can be configured to match the number of CPUs availible on the system and can set a maximum number of retires.
+A Go library for managing a background pool of workers that can be configured to match the number of CPUs available on the system. It provides features such as task retries, context-based cancellation, and graceful shutdown.
 
-Currently, this is a work in progress and is my first library. Any help or comments are welcome.
+## Features
 
-## Usage Example
+- Configure the number of concurrent workers
+- Set maximum number of retries for failed tasks
+- Cancel tasks using context
+- Graceful shutdown mechanism
+- Simple and easy-to-use API
+
+Currently, this is a work in progress. Any help or comments are welcome.
+
+## Basic Usage
 
 ```go
 package main
 
 import (
+    "context"
     "fmt"
     "github.com/Bia3/goWorkers"
     "math/rand"
-    "strconv"
     "time"
 )
 
-var MaxWorkers = 20
-var MaxRetries = 0
-var MyWorkers = goWorkers.NewQueue(MaxWorkers, MaxRetries)
-var totalSequentialDuration time.Duration
-
-func processX(x int) {
-    r := rand.Intn(2000)
-    dur := time.Duration(r) * time.Millisecond
-    time.Sleep(dur)
-    fmt.Printf("Process %s: processing time: %v\n", strconv.Itoa(x), dur)
-    totalSequentialDuration = totalSequentialDuration + dur
-}
-
 func main() {
-    go MyWorkers.RunWorkers()
+    // Create a worker pool with 20 workers and 0 retries
+    pool := goWorkers.NewPool(20, 0)
+
+    // Start the worker pool
+    go pool.RunWorkers()
 
     startTime := time.Now()
+    var totalSequentialDuration time.Duration
 
+    // Add 100 tasks to the pool
     for i := 0; i < 100; i++ {
-        //r := rand.Intn(100)
-        //time.Sleep(time.Duration(r) * time.Millisecond)
-        MyWorkers.NewTask(func() bool {
-            processX(i + 1)
-            return true
+        taskNum := i // Capture the loop variable
+
+        // Create a task with a background context
+        _, err := pool.NewTask(context.Background(), func() bool {
+            // Simulate work
+            r := rand.Intn(2000)
+            dur := time.Duration(r) * time.Millisecond
+            time.Sleep(dur)
+
+            fmt.Printf("Process %d: processing time: %v\n", taskNum+1, dur)
+            totalSequentialDuration += dur
+
+            return true // Task succeeded
         })
-    }
 
-    l := MyWorkers.Size()
-    rp := MyWorkers.RemainingProcesses
-
-    fmt.Println("Pool Size:", l)
-
-    //Wait for the pool to be clear
-    for rp > 0 {
-        rp = MyWorkers.RemainingProcesses
-        if int(time.Since(startTime).Milliseconds())%2000 == 0 {
-            fmt.Printf("Processs remaining: %d\n  Current queue length: %d\n  Currently processing: %d\n", rp, MyWorkers.Len(), rp-MyWorkers.Len())
-            time.Sleep(20 * time.Millisecond)
+        if err != nil {
+            fmt.Printf("Failed to add task: %v\n", err)
         }
     }
 
-    fmt.Println("Pool Size at Completion:", MyWorkers.Size())
+    // Wait for all tasks to complete
+    for pool.RemainingTasks() > 0 {
+        time.Sleep(100 * time.Millisecond)
+        fmt.Printf("Tasks remaining: %d\n", pool.RemainingTasks())
+    }
+
+    // Print statistics
     fmt.Println("Total Sequential Duration:", totalSequentialDuration)
     parDur := time.Since(startTime)
     fmt.Println("Total Parallel Duration:", parDur)
@@ -66,3 +71,22 @@ func main() {
     fmt.Println("Total Time Saved:", totalSequentialDuration-parDur)
 }
 ```
+
+## Graceful Shutdown
+
+The library provides a graceful shutdown mechanism that allows you to stop accepting new tasks and wait for all currently running tasks to complete.
+
+```go
+// Shutdown with no timeout (wait indefinitely for tasks to complete)
+pool.Shutdown(0)
+
+// Shutdown with a timeout of 5 seconds
+completed := pool.Shutdown(5 * time.Second)
+if !completed {
+    fmt.Println("Shutdown timed out, some tasks may not have completed")
+}
+```
+
+## Complete Example with Graceful Shutdown
+
+See the [gracefulShutdown example](examples/gracefulShutdown/main.go) for a complete example of how to use the graceful shutdown mechanism.
