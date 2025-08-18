@@ -38,7 +38,7 @@ func main() {
     for i := 0; i < 100; i++ {
         //r := rand.Intn(100)
         //time.Sleep(time.Duration(r) * time.Millisecond)
-        MyWorkers.NewItem(func() bool {
+        MyWorkers.NewTask(func() bool {
             processX(i + 1)
             return true
         })

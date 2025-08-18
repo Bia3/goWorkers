@@ -81,7 +81,7 @@ func (p *Pool) NewTask(function func() bool) string {
 	return item.id
 }
 
-func (p *Pool) Processing(item *Task) {
+func (p *Pool) processing(item *Task) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	item.Processing()
@@ -96,12 +96,6 @@ func (p *Pool) IsProcessing(id string) bool {
 }
 
 func (p *Pool) Next() (*Task, error) {
-	//p.mu.Lock()
-	//defer p.mu.Unlock()
-
-	//if len(p.taskQueue) == 0 {
-	//    return &Task{}, errors.New("no items in queue")
-	//}
 	item, err := p.dequeue()
 	if err != nil {
 		return &Task{}, err
@@ -135,7 +129,7 @@ func (p *Pool) Cancel(id string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	item, found := p.Find(id)
+	item, found := p.taskList[id]
 	if !found {
 		return errors.New("item not found")
 	} else {
@@ -199,28 +193,29 @@ func (p *Pool) AddWait() {
 	p.wg.Add(1)
 }
 
-func (p *Pool) Process(item *Task) bool {
-	p.Processing(item)
+func (p *Pool) process(item *Task) bool {
+	p.processing(item)
 	return item.function()
 }
 
-func (p *Pool) ProcessNext() error {
+func (p *Pool) processNext() error {
 	defer p.Done()
 
 	item, nErr := p.Next()
 	if nErr != nil {
 		return nErr
 	}
-	success := p.Process(item)
+	success := p.process(item)
 	if !success {
 		if item.pendingCancel {
 			p.remove(item)
 			p.removeFromQueue(item.id)
 			return nil
 		}
-		if item.retryCount < p.MaxRetries {
+		if item.retryCount < p.MaxRetries-1 {
 			item.retryCount++
 			p.requeue(item)
+			return nil
 		}
 	}
 	p.remove(item)
@@ -233,7 +228,7 @@ func (p *Pool) processAll() {
 	for i := 0; i < l; i++ {
 		p.AddWait()
 		go func() {
-			err := p.ProcessNext()
+			err := p.processNext()
 			if err != nil {
 				return
 			}
@@ -249,7 +244,7 @@ func (p *Pool) RunWorkers() {
 				for i := 0; i < p.MaxWorkers; i++ {
 					p.AddWait()
 					go func() {
-						err := p.ProcessNext()
+						err := p.processNext()
 						if err != nil {
 							return
 						}
