@@ -1,6 +1,7 @@
 package test
 
 import (
+	"context"
 	"fmt"
 	"github.com/Bia3/goWorkers"
 	"sync"
@@ -22,7 +23,7 @@ func TestWorkerPool(t *testing.T) {
 	// Add 10 tasks to the pool
 	for i := 0; i < 10; i++ {
 		taskID := i // Capture the loop variable
-		pool.NewTask(func() bool {
+		pool.NewTask(context.Background(), func() bool {
 			// Simulate work
 			time.Sleep(100 * time.Millisecond)
 
@@ -36,7 +37,7 @@ func TestWorkerPool(t *testing.T) {
 	}
 
 	// Wait for all tasks to complete
-	for pool.RemainingProcesses > 0 {
+	for pool.RemainingTasks() > 0 {
 		time.Sleep(50 * time.Millisecond)
 	}
 
@@ -66,7 +67,7 @@ func TestRetryMechanism(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		attempts := 0
 		taskNum := i // Capture the loop variable
-		pool.NewTask(func() bool {
+		pool.NewTask(context.Background(), func() bool {
 			// Simulate work
 			time.Sleep(100 * time.Millisecond)
 
@@ -95,7 +96,7 @@ func TestRetryMechanism(t *testing.T) {
 	}
 
 	// Wait for all tasks to complete
-	for pool.RemainingProcesses > 0 {
+	for pool.RemainingTasks() > 0 {
 		time.Sleep(50 * time.Millisecond)
 	}
 
@@ -113,4 +114,108 @@ func TestRetryMechanism(t *testing.T) {
 	}
 
 	fmt.Println("All tasks completed successfully after retries")
+}
+
+func TestContextCancellation(t *testing.T) {
+	// Create a worker pool with 2 workers and 0 retries
+	pool := goWorkers.NewQueue(2, 0)
+
+	// Start the worker pool
+	go pool.RunWorkers()
+
+	// Create variables to track results
+	var mu sync.Mutex
+	completedTasks := 0
+	cancelledTasks := 0
+	startedTasks := make(map[int]bool)
+
+	// Create a context with cancel function
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // Ensure context is cancelled when test exits
+
+	// Add 4 tasks to the pool
+	for i := 0; i < 4; i++ {
+		taskNum := i // Capture the loop variable
+
+		// Create a task-specific context for the first 2 tasks
+		var taskCtx context.Context
+		if i < 2 {
+			taskCtx = context.Background() // These tasks won't be cancelled
+		} else {
+			taskCtx = ctx // These tasks will be cancelled
+		}
+
+		pool.NewTask(taskCtx, func() bool {
+			// Mark task as started
+			mu.Lock()
+			startedTasks[taskNum] = true
+			mu.Unlock()
+
+			fmt.Printf("Task #%d started\n", taskNum)
+
+			// Simulate long-running work
+			for j := 0; j < 20; j++ {
+				select {
+				case <-time.After(50 * time.Millisecond):
+					fmt.Printf("Task #%d working... step %d/20\n", taskNum, j+1)
+				case <-taskCtx.Done():
+					// Context was cancelled
+					mu.Lock()
+					cancelledTasks++
+					mu.Unlock()
+					fmt.Printf("Task #%d was cancelled during execution at step %d/20\n", taskNum, j+1)
+					return false
+				}
+			}
+
+			// Task completed successfully
+			mu.Lock()
+			completedTasks++
+			mu.Unlock()
+			fmt.Printf("Task #%d completed successfully\n", taskNum)
+			return true
+		})
+	}
+
+	// Wait for at least tasks 0, 1, and 2 to start
+	startTime := time.Now()
+	timeout := time.Second * 5
+	allStarted := false
+
+	for time.Since(startTime) < timeout && !allStarted {
+		mu.Lock()
+		if len(startedTasks) >= 3 && startedTasks[2] {
+			allStarted = true
+		}
+		mu.Unlock()
+
+		if !allStarted {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	if !allStarted {
+		t.Fatalf("Timed out waiting for tasks to start. Started tasks: %v", startedTasks)
+	}
+
+	// Cancel the context
+	fmt.Println("Cancelling context...")
+	cancel()
+
+	// Wait for all tasks to complete or be cancelled
+	for pool.RemainingTasks() > 0 {
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Verify that tasks were either completed or cancelled
+	if completedTasks+cancelledTasks != 4 {
+		t.Errorf("Expected 4 tasks to be either completed or cancelled, got %d completed and %d cancelled", completedTasks, cancelledTasks)
+	}
+
+	// Verify that at least one task was cancelled
+	if cancelledTasks == 0 {
+		t.Errorf("Expected at least one task to be cancelled, but none were")
+	}
+
+	fmt.Printf("Tasks completed: %d, Tasks cancelled: %d\n", completedTasks, cancelledTasks)
 }
