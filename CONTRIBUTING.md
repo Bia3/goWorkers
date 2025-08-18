@@ -161,3 +161,5 @@ func TestParallelProcessing(t *testing.T) {
 - [ ] Add more comprehensive tests.
 - [ ] Add more examples demonstrating different use cases.
 - [ ] Add documentation for all exported functions and types.
+- [ ] Add timeout support for tasks.
+- [ ] Implement worker pool statistics (success rate, average processing time, etc.)
