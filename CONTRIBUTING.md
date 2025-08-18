@@ -152,11 +152,12 @@ func TestParallelProcessing(t *testing.T) {
 
 ### Known Issues
 
-- The retry mechanism may not work as expected. When a task fails, it should be requeued and retried, but there appears to be an issue with how tasks are removed from the pool after being requeued.
+- Proper error handling has not been fully implemented, and tasks may silently exit in the background without information.
 
 ### Future Improvements
 
-- [ ] Fix the retry mechanism.
+- [x] Fix the retry mechanism.
+- [ ] Add proper error handling for all functions that return errors.
 - [ ] Add more comprehensive tests.
 - [ ] Add more examples demonstrating different use cases.
 - [ ] Add documentation for all exported functions and types.
