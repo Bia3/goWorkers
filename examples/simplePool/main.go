@@ -11,7 +11,7 @@ import (
 
 var MaxWorkers = 20
 var MaxRetries = 0
-var MyWorkers = goWorkers.NewQueue(MaxWorkers, MaxRetries)
+var MyWorkers = goWorkers.NewPool(MaxWorkers, MaxRetries)
 var totalSequentialDuration time.Duration
 
 func processX(x int) {

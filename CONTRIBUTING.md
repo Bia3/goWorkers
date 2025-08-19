@@ -72,7 +72,7 @@ import (
 
 func TestParallelProcessing(t *testing.T) {
 	// Create a worker pool with 5 workers and 0 retries
-	pool := goWorkers.NewQueue(5, 0)
+	pool := goWorkers.NewPool(5, 0)
 
 	// Start the worker pool
 	go pool.RunWorkers()

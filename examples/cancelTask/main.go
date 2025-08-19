@@ -9,7 +9,7 @@ import (
 
 var MaxWorkers = 20
 var MaxRetries = 3
-var MyWorkers = goWorkers.NewQueue(MaxWorkers, MaxRetries)
+var MyWorkers = goWorkers.NewPool(MaxWorkers, MaxRetries)
 
 var attempt = 0
 

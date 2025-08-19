@@ -11,7 +11,7 @@ import (
 
 func TestWorkerPool(t *testing.T) {
 	// Create a worker pool with 5 workers and 0 retries
-	pool := goWorkers.NewQueue(5, 0)
+	pool := goWorkers.NewPool(5, 0)
 
 	// Start the worker pool
 	go pool.RunWorkers()
@@ -52,7 +52,7 @@ func TestWorkerPool(t *testing.T) {
 
 func TestRetryMechanism(t *testing.T) {
 	// Create a worker pool with 3 workers and 2 retries
-	pool := goWorkers.NewQueue(3, 2)
+	pool := goWorkers.NewPool(3, 2)
 
 	// Start the worker pool
 	go pool.RunWorkers()
@@ -118,7 +118,7 @@ func TestRetryMechanism(t *testing.T) {
 
 func TestContextCancellation(t *testing.T) {
 	// Create a worker pool with 2 workers and 0 retries
-	pool := goWorkers.NewQueue(2, 0)
+	pool := goWorkers.NewPool(2, 0)
 
 	// Start the worker pool
 	go pool.RunWorkers()
