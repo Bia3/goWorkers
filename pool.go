@@ -444,7 +444,9 @@ func (p *Pool) process(item *Task) bool {
 		return result
 	case <-item.ctx.Done():
 		// Task was cancelled during execution
+		item.mu.Lock()
 		item.pendingCancel = true
+		item.mu.Unlock()
 		// Wait for the function to complete to avoid goroutine leaks
 		<-done
 		return false
@@ -470,19 +472,27 @@ func (p *Pool) processNext() error {
 	success := p.process(item)
 	if !success {
 		// If the task was cancelled or marked for cancellation, don't retry
-		if item.pendingCancel || item.IsCancelled() {
+		item.mu.Lock()
+		pendingCancel := item.pendingCancel
+		item.mu.Unlock()
+
+		if pendingCancel || item.IsCancelled() {
 			p.remove(item)
 			p.removeFromQueue(item.id)
 			return nil
 		}
 
 		// Retry the task if retries are available
-		if item.retryCount < p.MaxRetries-1 {
+		item.mu.Lock()
+		retryCount := item.retryCount
+		if retryCount < p.MaxRetries-1 {
 			item.retryCount++
+			item.mu.Unlock()
 			item.ResetProcessing()
 			p.requeue(item)
 			return nil
 		}
+		item.mu.Unlock()
 	}
 
 	p.remove(item)
@@ -492,7 +502,10 @@ func (p *Pool) processNext() error {
 
 // processAll processes all tasks in the queue.
 func (p *Pool) processAll() {
-	l := p.Len()
+	p.mu.Lock()
+	l := len(p.taskQueue)
+	p.mu.Unlock()
+
 	for i := 0; i < l; i++ {
 		p.AddWait()
 		go func() {
@@ -525,10 +538,14 @@ func (p *Pool) RunWorkers() {
 			return
 		default:
 			// Continue normal operation
-			l := p.Len()
+			p.mu.Lock()
+			l := len(p.taskQueue)
+			maxWorkers := p.MaxWorkers
+			p.mu.Unlock()
+
 			if l > 0 {
-				if l > p.MaxWorkers {
-					for i := 0; i < p.MaxWorkers; i++ {
+				if l > maxWorkers {
+					for i := 0; i < maxWorkers; i++ {
 						p.AddWait()
 						go func() {
 							err := p.processNext()
@@ -553,7 +570,15 @@ func (p *Pool) RunWorkers() {
 // This is used during shutdown to ensure all tasks are completed.
 func (p *Pool) processRemainingTasks() {
 	// Process all remaining tasks
-	for p.Len() > 0 {
+	for {
+		p.mu.Lock()
+		queueEmpty := len(p.taskQueue) == 0
+		p.mu.Unlock()
+
+		if queueEmpty {
+			break
+		}
+
 		p.processAll()
 		p.Wait()
 	}
