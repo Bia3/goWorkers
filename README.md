@@ -7,6 +7,7 @@ A Go library for managing a background pool of workers that can be configured to
 - Configure the number of concurrent workers
 - Set maximum number of retries for failed tasks
 - Cancel tasks using context
+- Set timeouts for task execution
 - Graceful shutdown mechanism
 - Simple and easy-to-use API
 
@@ -87,6 +88,34 @@ if !completed {
 }
 ```
 
-## Complete Example with Graceful Shutdown
+## Task Timeouts
 
-See the [gracefulShutdown example](examples/gracefulShutdown/main.go) for a complete example of how to use the graceful shutdown mechanism.
+You can set a timeout for task execution, after which the task will be automatically cancelled if it hasn't completed.
+
+```go
+// Create a task with a background context
+taskID, err := pool.NewTask(context.Background(), func() bool {
+    // Simulate long-running work
+    time.Sleep(2 * time.Second)
+    return true
+})
+
+if err != nil {
+    fmt.Printf("Failed to add task: %v\n", err)
+}
+
+// Find the task and set a timeout of 1 second
+task, found := pool.Find(taskID)
+if found {
+    task.WithTimeout(1 * time.Second)
+}
+
+// The task will be automatically cancelled after 1 second if it hasn't completed
+```
+
+## Complete Examples
+
+- [Simple Pool](examples/simplePool/main.go) - Basic usage of the worker pool
+- [Graceful Shutdown](examples/gracefulShutdown/main.go) - How to use the graceful shutdown mechanism
+- [Task Cancellation](examples/cancelTask/main.go) - How to cancel tasks using context
+- [Task Timeout](examples/taskTimeout/main.go) - How to set timeouts for tasks

@@ -36,6 +36,7 @@ type Task struct {
 	id            string             // Unique identifier for the task
 	ctx           context.Context    // Context for cancellation
 	cancel        context.CancelFunc // Function to cancel the context
+	timeout       time.Duration      // Timeout for task execution (0 means no timeout)
 }
 
 // Pool represents a worker pool that processes tasks concurrently.
@@ -133,6 +134,18 @@ func (t *Task) IsCancelled() bool {
 	default:
 		return false
 	}
+}
+
+// WithTimeout sets a timeout for the task execution.
+// If the task takes longer than the specified timeout to complete,
+// it will be automatically cancelled.
+// A timeout of 0 or negative means no timeout.
+// This method returns the task itself to allow for method chaining.
+func (t *Task) WithTimeout(timeout time.Duration) *Task {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.timeout = timeout
+	return t
 }
 
 // New creates a new worker pool with the specified maximum number of workers and retries.
@@ -438,18 +451,52 @@ func (p *Pool) process(item *Task) bool {
 		done <- result
 	}()
 
-	// Wait for either task completion or cancellation
-	select {
-	case result := <-done:
-		return result
-	case <-item.ctx.Done():
-		// Task was cancelled during execution
-		item.mu.Lock()
-		item.pendingCancel = true
-		item.mu.Unlock()
-		// Wait for the function to complete to avoid goroutine leaks
-		<-done
-		return false
+	// Get the timeout value (if any)
+	item.mu.Lock()
+	timeout := item.timeout
+	item.mu.Unlock()
+
+	// If timeout is set, wait for either task completion, cancellation, or timeout
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+
+		select {
+		case result := <-done:
+			return result
+		case <-item.ctx.Done():
+			// Task was cancelled during execution
+			item.mu.Lock()
+			item.pendingCancel = true
+			item.mu.Unlock()
+			// Wait for the function to complete to avoid goroutine leaks
+			<-done
+			return false
+		case <-timer.C:
+			// Task timed out
+			item.mu.Lock()
+			item.pendingCancel = true
+			item.mu.Unlock()
+			// Cancel the task's context to signal cancellation to the function
+			item.cancel()
+			// Wait for the function to complete to avoid goroutine leaks
+			<-done
+			return false
+		}
+	} else {
+		// No timeout, wait for either task completion or cancellation
+		select {
+		case result := <-done:
+			return result
+		case <-item.ctx.Done():
+			// Task was cancelled during execution
+			item.mu.Lock()
+			item.pendingCancel = true
+			item.mu.Unlock()
+			// Wait for the function to complete to avoid goroutine leaks
+			<-done
+			return false
+		}
 	}
 }
 

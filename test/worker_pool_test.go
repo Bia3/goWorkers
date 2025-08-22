@@ -219,3 +219,107 @@ func TestContextCancellation(t *testing.T) {
 
 	fmt.Printf("Tasks completed: %d, Tasks cancelled: %d\n", completedTasks, cancelledTasks)
 }
+
+func TestTaskTimeout(t *testing.T) {
+	// Create a worker pool with 3 workers and 0 retries
+	pool := goWorkers.NewPool(3, 0)
+
+	// Start the worker pool
+	go pool.RunWorkers()
+
+	// Create variables to track results
+	var mu sync.Mutex
+	completedTasks := 0
+	timedOutTasks := 0
+	startedTasks := make(map[int]bool)
+
+	// Add 5 tasks to the pool with different timeouts
+	for i := 0; i < 5; i++ {
+		taskNum := i // Capture the loop variable
+
+		// Create a task with different timeout based on task number
+		taskID, err := pool.NewTask(context.Background(), func() bool {
+			// Mark task as started
+			mu.Lock()
+			startedTasks[taskNum] = true
+			mu.Unlock()
+
+			fmt.Printf("Task #%d started\n", taskNum)
+
+			// Simulate work with different durations
+			// Tasks 0, 2, 4 will complete within their timeout
+			// Tasks 1, 3 will exceed their timeout and be cancelled
+			var workDuration time.Duration
+			if taskNum%2 == 0 {
+				// Even-numbered tasks complete quickly (200ms)
+				workDuration = 200 * time.Millisecond
+			} else {
+				// Odd-numbered tasks take longer (600ms)
+				workDuration = 600 * time.Millisecond
+			}
+
+			// Check for cancellation while working
+			select {
+			case <-time.After(workDuration):
+				// Task completed successfully
+				mu.Lock()
+				completedTasks++
+				mu.Unlock()
+				fmt.Printf("Task #%d completed successfully after %v\n", taskNum, workDuration)
+				return true
+			case <-context.Background().Done():
+				// This should never happen with a background context
+				t.Errorf("Background context was unexpectedly cancelled")
+				return false
+			}
+		})
+
+		if err != nil {
+			t.Fatalf("Failed to create task: %v", err)
+		}
+
+		// Find the task and set timeout
+		task, found := pool.Find(taskID)
+		if !found {
+			t.Fatalf("Task %s not found in pool", taskID)
+		}
+
+		// Set timeout based on task number
+		// Even-numbered tasks get 300ms timeout (should complete)
+		// Odd-numbered tasks get 300ms timeout (should time out)
+		task.WithTimeout(300 * time.Millisecond)
+	}
+
+	// Wait for all tasks to complete or time out
+	startTime := time.Now()
+	maxWaitTime := 2 * time.Second
+
+	for pool.RemainingTasks() > 0 && time.Since(startTime) < maxWaitTime {
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Check if any tasks are still running after the wait time
+	if pool.RemainingTasks() > 0 {
+		t.Fatalf("Not all tasks completed within the expected time. Remaining tasks: %d", pool.RemainingTasks())
+	}
+
+	// Count timed out tasks by checking which ones didn't complete
+	for i := 0; i < 5; i++ {
+		if i%2 == 1 && startedTasks[i] {
+			mu.Lock()
+			timedOutTasks++
+			mu.Unlock()
+		}
+	}
+
+	// Verify that the expected number of tasks completed and timed out
+	if completedTasks != 3 {
+		t.Errorf("Expected 3 completed tasks (tasks 0, 2, 4), got %d", completedTasks)
+	}
+
+	if timedOutTasks != 2 {
+		t.Errorf("Expected 2 timed out tasks (tasks 1, 3), got %d", timedOutTasks)
+	}
+
+	fmt.Printf("Tasks completed: %d, Tasks timed out: %d\n", completedTasks, timedOutTasks)
+}
